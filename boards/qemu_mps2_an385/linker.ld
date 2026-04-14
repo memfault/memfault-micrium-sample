@@ -1,0 +1,131 @@
+MEMORY
+{
+    FLASH (xr) : ORIGIN = 0x00000000, LENGTH = 4M
+    RAM (xrw)  : ORIGIN = 0x20000000, LENGTH = 1M
+}
+ENTRY(Reset_Handler)
+
+_Min_Heap_Size = 0x3000 ;        /* Required amount of heap. */
+_Min_Stack_Size = 0x4000 ;       /* Required amount of stack. */
+_estack = ORIGIN(RAM) + LENGTH(RAM);
+
+SECTIONS
+{
+
+    .isr_vector :
+    {
+        __vector_table = .;
+        KEEP(*(.isr_vector))
+        . = ALIGN(4);
+    } > FLASH
+
+    .text :
+    {
+        . = ALIGN(4);
+        *(.text*)
+        KEEP (*(.init))
+        KEEP (*(.fini))
+        KEEP(*(.eh_frame))
+        *(.rodata*)
+        . = ALIGN(4);
+        _etext = .;
+    } > FLASH
+
+    .note.gnu.build-id :
+    {
+        __start_gnu_build_id_start = .;
+        KEEP(*(.note.gnu.build-id))
+    } > FLASH
+
+    .ARM.extab :
+    {
+        . = ALIGN(4);
+        *(.ARM.extab* .gnu.linkonce.armextab.*)
+        . = ALIGN(4);
+    } >FLASH
+
+    .ARM :
+    {
+        . = ALIGN(4);
+        __exidx_start = .;
+        *(.ARM.exidx* .gnu.linkonce.armexidx.*)
+        __exidx_end = .;
+        . = ALIGN(4);
+    } >FLASH
+
+    _sidata = LOADADDR(.data);
+
+    .data :
+    {
+        . = ALIGN(4);
+        _sdata = .;
+        *(.data*)
+        . = ALIGN(4);
+        _edata = .;
+    } > RAM AT > FLASH
+
+    /* No-init section for reboot tracking (preserved across resets) */
+    .noinit (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.noinit*)
+        . = ALIGN(4);
+    } > RAM
+
+    .uninitialized (NOLOAD):
+    {
+        . = ALIGN(32);
+        __uninitialized_start = .;
+        *(.uninitialized)
+        KEEP(*(.keep.uninitialized))
+        . = ALIGN(32);
+        __uninitialized_end = .;
+    } > RAM
+
+    .bss :
+    {
+        . = ALIGN(4);
+        _sbss = .;
+        __bss_start__ = _sbss;
+        /* Capture Micrium OS core state for coredump (OSTCBCurPtr, OSTaskDbgListPtr, etc.) */
+        __memfault_capture_bss_start = .;
+        *os_core*.o(.bss COMMON .bss*)
+        *os_task*.o(.bss COMMON .bss*)
+        *os_var*.o(.bss COMMON .bss*)
+        __memfault_capture_bss_end = .;
+        *(.bss*)
+        *(COMMON)
+        . = ALIGN(4);
+        _ebss = .;
+        __bss_end__ = _ebss;
+    } >RAM
+
+    .heap :
+    {
+        . = ALIGN(8);
+        PROVIDE ( end = . );
+        PROVIDE ( _end = . );
+        _heap_bottom = .;
+        . = . + _Min_Heap_Size;
+        _heap_top = .;
+        . = . + _Min_Stack_Size;
+        . = ALIGN(8);
+       } >RAM
+
+   /* Set stack top to end of RAM, and stack limit move down by
+    * size of stack_dummy section */
+   __StackTop = ORIGIN(RAM) + LENGTH(RAM);
+   __StackLimit = __StackTop - _Min_Stack_Size;
+   PROVIDE(__stack = __StackTop);
+
+    log_fmt 0xF0000000 (INFO):
+    {
+        /* Old ld (GCC ARM 4.9.3 for example) doesn't emit this symbol by default */
+        __start_log_fmt = ABSOLUTE(.);
+        KEEP(*(*.log_fmt_hdr))
+        KEEP(*(log_fmt))
+    }
+
+  /* Check if data + heap + stack exceeds RAM limit */
+  ASSERT(__StackLimit >= _heap_top, "region RAM overflowed with stack")
+}

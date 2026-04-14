@@ -1,0 +1,2 @@
+// libc heap utilization, per-mille (scaled by 100 on ingestion → percentage)
+MEMFAULT_METRICS_KEY_DEFINE_WITH_SCALE_VALUE(memory_pct_max, kMemfaultMetricType_Unsigned, 100)
