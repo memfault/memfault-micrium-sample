@@ -13,6 +13,15 @@
 
 #if defined(MEMFAULT_DEMO_SHELL_COMMAND_EXTENSIONS)
 
+// Check whether a pointer + size falls entirely within readable RAM.
+// Mirrors the region table in memfault_platform_impl.c.
+static bool prv_ptr_in_ram(const void *ptr, size_t size) {
+  const uint32_t ram_start = 0x20000000u;
+  const uint32_t ram_end = ram_start + 0x800000u;
+  const uint32_t addr = (uint32_t)ptr;
+  return (ptr != NULL) && (addr >= ram_start) && (addr <= ram_end - size);
+}
+
 static const char *prv_task_state_str(const OS_TCB *tcb) {
   if (tcb == OSTCBCurPtr) {
     return "Running";
@@ -47,22 +56,40 @@ static int prv_micrium_tasks_cmd(int argc, char *argv[]) {
 #if (OS_CFG_DBG_EN == DEF_ENABLED)
   OS_TCB *tcb = OSTaskDbgListPtr;
   while (tcb != NULL) {
-    const char *name = (tcb->NamePtr != NULL) ? (const char *)tcb->NamePtr : "?";
+    // Validate the TCB pointer itself before dereferencing
+    if (!prv_ptr_in_ram(tcb, sizeof(OS_TCB))) {
+      printf("(corrupt TCB pointer 0x%08lx — stopping walk)\n", (unsigned long)(uintptr_t)tcb);
+      break;
+    }
+
+    const char *name = "?";
+    if (prv_ptr_in_ram(tcb->NamePtr, 1)) {
+      name = (const char *)tcb->NamePtr;
+    }
 
     CPU_STK_SIZE total = tcb->StkSize;
-    // Estimate used stack by counting zero words from base
-    CPU_STK_SIZE free_words = 0;
-    CPU_STK *p = tcb->StkBasePtr;
-    while (free_words < total && *p == 0u) {
-      p++;
-      free_words++;
+    CPU_STK_SIZE used = 0;
+    if (prv_ptr_in_ram(tcb->StkBasePtr, total * sizeof(CPU_STK))) {
+      // Estimate used stack by counting zero words from base
+      CPU_STK_SIZE free_words = 0;
+      CPU_STK *p = tcb->StkBasePtr;
+      while (free_words < total && *p == 0u) {
+        p++;
+        free_words++;
+      }
+      used = total - free_words;
     }
-    CPU_STK_SIZE used = total - free_words;
 
     printf("%-16s %8u  %-10s  %5lu / %-5lu\n", name, (unsigned)tcb->Prio,
            prv_task_state_str(tcb), (unsigned long)used, (unsigned long)total);
 
-    tcb = tcb->DbgNextPtr;
+    // Validate DbgNextPtr before following it
+    OS_TCB *next = tcb->DbgNextPtr;
+    if (next != NULL && !prv_ptr_in_ram(next, sizeof(OS_TCB))) {
+      printf("(corrupt DbgNextPtr 0x%08lx — stopping walk)\n", (unsigned long)(uintptr_t)next);
+      break;
+    }
+    tcb = next;
   }
 #else
   printf("(OS_CFG_DBG_EN disabled — task list not available)\n");

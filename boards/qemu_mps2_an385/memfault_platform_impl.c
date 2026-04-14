@@ -92,8 +92,8 @@ static uint32_t prv_read_psp_reg(void) {
 // Coredump region array — sized to hold:
 //   1 active stack + 1 optional ISR PSP stack
 //   + 1 __memfault_capture_bss region
-//   + task stacks (generous upper bound)
-#define COREDUMP_MAX_REGIONS (3 + 20)
+//   + per-task: TCB + stack (2 regions each)
+#define COREDUMP_MAX_REGIONS (3 + 2 * 20)
 
 static sMfltCoredumpRegion s_coredump_regions[COREDUMP_MAX_REGIONS];
 
@@ -127,10 +127,21 @@ const sMfltCoredumpRegion *memfault_platform_coredump_get_regions(
   s_coredump_regions[region_idx++] =
     MEMFAULT_COREDUMP_MEMORY_REGION_INIT(&__memfault_capture_bss_start, bss_capture_size);
 
-  // 4. Walk the debug TCB list and capture each task's stack
+  // 4. Walk the debug TCB list and capture each task's TCB + stack
 #if (OS_CFG_DBG_EN == DEF_ENABLED)
   OS_TCB *tcb = OSTaskDbgListPtr;
   while (tcb != NULL) {
+    // Validate the TCB pointer itself before dereferencing
+    if (memfault_platform_sanitize_address_range(tcb, sizeof(OS_TCB)) < sizeof(OS_TCB)) {
+      break;
+    }
+
+    if (region_idx < (int)MEMFAULT_ARRAY_SIZE(s_coredump_regions)) {
+      // Capture the TCB struct itself (needed for thread decode)
+      s_coredump_regions[region_idx++] =
+        MEMFAULT_COREDUMP_MEMORY_REGION_INIT(tcb, sizeof(OS_TCB));
+    }
+
     if (tcb->StkBasePtr != NULL && tcb->StkSize > 0 &&
         region_idx < (int)MEMFAULT_ARRAY_SIZE(s_coredump_regions)) {
       const size_t stk_bytes = (size_t)tcb->StkSize * sizeof(CPU_STK);
@@ -141,7 +152,14 @@ const sMfltCoredumpRegion *memfault_platform_coredump_get_regions(
           MEMFAULT_COREDUMP_MEMORY_REGION_INIT(tcb->StkBasePtr, sanitized);
       }
     }
-    tcb = tcb->DbgNextPtr;
+
+    // Validate DbgNextPtr before following it
+    OS_TCB *next = tcb->DbgNextPtr;
+    if (next != NULL &&
+        memfault_platform_sanitize_address_range(next, sizeof(OS_TCB)) < sizeof(OS_TCB)) {
+      break;
+    }
+    tcb = next;
   }
 #endif
 
