@@ -12,7 +12,7 @@
 #include "os.h"
 
 #define METRICS_TASK_PRIO 20u
-#define METRICS_STK_SIZE 256u
+#define METRICS_STK_SIZE 512u
 
 static OS_TCB s_metrics_tcb;
 static CPU_STK s_metrics_stk[METRICS_STK_SIZE];
